@@ -84,7 +84,6 @@
     unknown value and is expected to return a formatting document representing
     it.
   "
-  ;(:require-macros [puget.macros :refer [current-ns]])
   (:require
     [arrangement.core :as order]
     [clojure.string :as str]
@@ -94,36 +93,6 @@
     [puget.color.ansi]
     [puget.color.html]
     [puget.dispatch :as dispatch]))
-
-(defn get-type-name
-  "Get the type of the given object as a string. For Clojure, gets the name of
-  the class of the object. For ClojureScript, gets either the `name` attribute
-  or the protocol name if the `name` attribute doesn't exist."
-  [x]
-  #?(:clj (.getName (class x))
-     :cljs (let [t (type x)
-                 n (.-name t)]
-             (if (empty? n)
-               (pr-str t)
-               n))))
-
-(defn get-type
-  "Get type of a given argument"
-  [x]
-  #?(:clj (class x)
-     :cljs  (type x)))
-
-
-(defn to-hex-string
-  "Returns a hex representation of input-string"
-  [input-string]
-  (let [transformed-string #?(:clj (Integer/toHexString input-string)
-                              :cljs (.toString input-string 16))]
-    (case (count transformed-string)
-      0 "00"
-      1 (str "0" transformed-string)
-      (subs transformed-string (- (count transformed-string) 2) (count transformed-string)))))
-        
 
 
 ;; ## Control Vars
@@ -232,9 +201,9 @@
   ([printer value]
    (format-unknown printer value (str value)))
   ([printer value repr]
-   (format-unknown printer value (get-type-name value) repr))
+   (format-unknown printer value (.getName (class value)) repr))
   ([printer value tag repr]
-   (let [sys-id (to-hex-string (hash value))]
+   (let [sys-id (Integer/toHexString (System/identityHashCode value))]
      [:span
       (color/document printer :class-delimiter "#<")
       (color/document printer :class-name tag)
@@ -249,7 +218,7 @@
   "Formats a document without considering metadata."
   [printer value]
   (let [lookup (:print-handlers printer)
-        handler (and lookup (lookup (get-type value)))]
+        handler (and lookup (lookup (class value)))]
     (if handler
       (handler printer value)
       (fv/visit* printer value))))
@@ -298,12 +267,12 @@
 (def java-handlers
   "Map of print handlers for Java types. This supports syntax for regular
   expressions, dates, UUIDs, and futures."
-  {:a;java.lang.Class
+  {java.lang.Class
    (fn class-handler
      [printer value]
      (format-unknown printer value "Class" (.getName ^Class value)))
 
-   :b;java.util.concurrent.Future
+   java.util.concurrent.Future
    (fn future-handler
      [printer value]
      (let [doc (if (future-done? value)
@@ -311,7 +280,7 @@
                  (color/document printer :nil "pending"))]
        (format-unknown printer value "Future" doc)))
 
-   :c;java.util.Date
+   java.util.Date
    (tagged-handler
      'inst
      #(-> "yyyy-MM-dd'T'HH:mm:ss.SSS-00:00"
@@ -319,7 +288,7 @@
           (doto (.setTimeZone (java.util.TimeZone/getTimeZone "GMT")))
           (.format ^java.util.Date %)))
 
-   :d;java.util.UUID
+   java.util.UUID
    (tagged-handler 'uuid str)})
 
 
@@ -358,7 +327,7 @@
    clojure.lang.Fn
    (fn fn-handler
      [printer value]
-     (let [doc (let [[vname & tail] (-> (get-type-name value)
+     (let [doc (let [[vname & tail] (-> (.getName (class value))
                                         (str/replace-first "$" "/")
                                         (str/split #"\$"))]
                  (if (seq tail)
@@ -485,13 +454,9 @@
 
   (visit-unknown
     [this value]
-    (let [not-defined-representation-message (str "No defined representation for "
-                                              (get-type value)
-                                              ": "
-                                              (pr-str value))]
-      #?(:clj (throw (IllegalArgumentException. not-defined-representation-message))
-         :cljs (throw not-defined-representation-message)))))
-
+    (throw (IllegalArgumentException.
+             (str "No defined representation for " (class value) ": "
+                  (pr-str value))))))
 
 
 (defn canonical-printer
@@ -504,8 +469,7 @@
 
 
 ; Remove automatic constructor function.
-#?(:clj (ns-unmap *ns* '->CanonicalPrinter))
-
+(ns-unmap *ns* '->CanonicalPrinter)
 
 
 
@@ -650,7 +614,7 @@
     [this value]
     (fv/visit-tagged
       this
-      (tagged-literal (symbol (get-type-name value))
+      (tagged-literal (symbol (.getName (class value)))
                       (into {} value))))
 
 
@@ -674,21 +638,15 @@
       [:span (pr-str value)]
 
       :error
-      #?(:clj
-         (throw (IllegalArgumentException.
-                 (str "No defined representation for " (get-type value) ": "
-                      (pr-str value))))
-         :cljs
-         (throw (str "No defined representation for " (get-type value) ": "
-                      (pr-str value))))
+      (throw (IllegalArgumentException.
+               (str "No defined representation for " (class value) ": "
+                    (pr-str value))))
 
       (if (ifn? print-fallback)
         (print-fallback this value)
-        #?(:clj (throw (IllegalStateException.
-                   (str "Unsupported value for print-fallback: "
-                        (pr-str print-fallback))))
-           :cljs (throw (str "Unsupported value for print-fallback: "
-                             (pr-str print-fallback))))))))
+        (throw (IllegalStateException.
+                 (str "Unsupported value for print-fallback: "
+                      (pr-str print-fallback))))))))
 
 
 (defn pretty-printer
@@ -703,8 +661,7 @@
 
 
 ; Remove automatic constructor function.
-#?(:clj (ns-unmap *ns* '->PrettyPrinter))
-
+(ns-unmap *ns* '->PrettyPrinter)
 
 
 
